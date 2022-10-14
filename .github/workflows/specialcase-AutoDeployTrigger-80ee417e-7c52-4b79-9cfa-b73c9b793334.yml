@@ -1,0 +1,60 @@
+name: Trigger auto deployment for specialcase
+
+# When this action will be executed
+on:
+  # Automatically trigger it when detected changes in repo
+  push:
+    branches: 
+      [ GitTesting ]
+    paths:
+    - '**'
+    - '.github/workflows/specialcase-AutoDeployTrigger-80ee417e-7c52-4b79-9cfa-b73c9b793334.yml'
+
+  # Allow mannually trigger 
+  workflow_dispatch:      
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout to the branch
+        uses: actions/checkout@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Log in to container registry
+        uses: docker/login-action@v1
+        with:
+          registry: antuxtest.azurecr.io
+          username: ${{ secrets.SPECIALCASE_REGISTRY_USERNAME }}
+          password: ${{ secrets.SPECIALCASE_REGISTRY_PASSWORD }}
+
+      - name: Build and push container image to registry
+        uses: docker/build-push-action@v2
+        with:
+          push: true
+          tags: antuxtest.azurecr.io/andimarc-ci-test:${{ github.sha }}
+          file: ./Dockerfile
+          context: ./
+
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.SPECIALCASE_AZURE_CREDENTIALS }}
+
+
+      - name: Deploy to containerapp
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az config set extension.use_dynamic_install=yes_without_prompt
+            az containerapp registry set -n specialcase -g andimarc-ca-newrp-rg --server antuxtest.azurecr.io --username  ${{ secrets.SPECIALCASE_REGISTRY_USERNAME }} --password ${{ secrets.SPECIALCASE_REGISTRY_PASSWORD }}
+            az containerapp update -n specialcase -g andimarc-ca-newrp-rg --image antuxtest.azurecr.io/andimarc-ci-test:${{ github.sha }}
